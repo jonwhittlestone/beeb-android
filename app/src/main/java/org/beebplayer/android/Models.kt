@@ -15,14 +15,16 @@ fun artwork(images: JSONObject?, episode: Boolean = false, large: Boolean = fals
 }
 
 data class Programme(val id: String, val title: String, val subtitle: String = "", val summary: String = "", val image: String = "", val version: String = "", val showId: String = id, val uhd: Boolean = false, val hdr: Boolean = false, val duration: String = "", val series: String = "Episodes", val position: Int = 0, val date: String = "", val guidance: String = "") {
-    fun json() = JSONObject().put("id", id).put("title", title).put("subtitle", subtitle).put("summary", summary).put("image", image).put("version", version).put("showId", showId).put("uhd", uhd).put("hdr", hdr).put("duration", duration).put("series", series).put("position", position).put("date", date)
+    fun json() = JSONObject().put("id", id).put("title", title).put("subtitle", subtitle).put("summary", summary).put("image", image).put("version", version).put("showId", showId).put("uhd", uhd).put("hdr", hdr).put("duration", duration).put("series", series).put("position", position).put("date", date).put("guidance", guidance)
     companion object {
-        fun restore(j: JSONObject) = Programme(j.text("id"), j.text("title"), j.text("subtitle"), j.text("summary"), j.text("image"), j.text("version"), j.text("showId", j.text("id")), j.optBoolean("uhd"), j.optBoolean("hdr"), j.text("duration"), j.text("series", "Episodes"), j.optInt("position"), j.text("date"))
+        fun restore(j: JSONObject) = Programme(j.text("id"), j.text("title"), j.text("subtitle"), j.text("summary"), j.text("image"), j.text("version"), j.text("showId", j.text("id")), j.optBoolean("uhd"), j.optBoolean("hdr"), j.text("duration"), j.text("series", "Episodes"), j.optInt("position"), j.text("date"), j.text("guidance"))
+        /** BBC's warning text for a version, as Beeb-public reads it (version.guidance.text.large). */
+        fun guidance(version: JSONObject) = version.optJSONObject("guidance")?.optJSONObject("text")?.text("large").orEmpty()
         fun episode(j: JSONObject): Programme {
             require(j.text("id").matches(Regex("[a-z0-9]{8}"))) { "Invalid episode identifier" }
             val v = PlaybackVersions.available(j).firstOrNull() ?: error("No standard version of this episode is currently available.")
             val sub = j.text("subtitle")
-            return Programme(j.text("id"), j.text("title"), sub, j.fields("synopses", "large", "medium", "small"), artwork(j.optJSONObject("images"), episode = true), v.text("id"), j.text("tleo_id", j.text("id")), v.optBoolean("uhd"), v.optBoolean("hdr"), v.optJSONObject("duration")?.text("text").orEmpty(), seriesOf(sub, j.text("slice_id") != ""), j.optInt("parent_position"), j.text("release_date_time"))
+            return Programme(j.text("id"), j.text("title"), sub, j.fields("synopses", "large", "medium", "small"), artwork(j.optJSONObject("images"), episode = true), v.text("id"), j.text("tleo_id", j.text("id")), v.optBoolean("uhd"), v.optBoolean("hdr"), v.optJSONObject("duration")?.text("text").orEmpty(), seriesOf(sub, j.text("slice_id") != ""), j.optInt("parent_position"), j.text("release_date_time"), guidance(v))
         }
         // BBC tags most series with a slice; some companion shows (such as The Celebrity Traitors: Uncloaked) only name the series in the subtitle.
         private val seriesPrefix = Regex("^([^:]*\\b(?:Series|Season)\\s+\\d+): ", RegexOption.IGNORE_CASE)
