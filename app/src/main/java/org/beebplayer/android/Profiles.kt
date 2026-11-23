@@ -18,6 +18,7 @@ class ProfileStore(private val kv: KeyValue, private val clock: () -> Double = :
         const val REMOVED_KEY = "beebProfilesRemoved-v1"
         const val CURRENT_KEY = "beebProfile"
         const val PIN_KEY = "beebKidsPIN"
+        const val STARTUP_KEY = "beebProfileStartup"
         const val MAX_NAME = 30
         fun currentId(kv: KeyValue) = kv.getString(CURRENT_KEY) ?: DEFAULT_ID
     }
@@ -29,9 +30,14 @@ class ProfileStore(private val kv: KeyValue, private val clock: () -> Double = :
         get() = kv.getString(PIN_KEY) ?: ""
         set(value) = kv.putString(PIN_KEY, value)
     /** "last", "ask" or a profile id ("Always <name>"). */
-    var startup: String = "last"
+    var startup: String
+        get() = kv.getString(STARTUP_KEY) ?: "last"
+        set(value) = kv.putString(STARTUP_KEY, value)
     /** Applies the startup setting; true when the profile picker must be shown first. */
-    fun launch(): Boolean = false
+    fun launch(): Boolean {
+        if (profile(startup) != null) select(startup)
+        return startup == "ask" && profiles.size > 1
+    }
     val current: BeebProfile get() = profile(currentId) ?: profiles.first()
 
     fun profile(id: String) = profiles.firstOrNull { it.id == id }
@@ -53,6 +59,7 @@ class ProfileStore(private val kv: KeyValue, private val clock: () -> Double = :
         removed = removed + (id to clock())
         LocalStore.PROFILE_KEYS.forEach { kv.putString("$it-$id", null) }
         if (currentId == id) select(profiles.first().id)
+        if (startup == id) startup = "last"
         save(); return true
     }
 
