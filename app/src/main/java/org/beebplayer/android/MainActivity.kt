@@ -418,16 +418,30 @@ class MainActivity : ComponentActivity() {
             pageHeader.addView(bookmark, LinearLayout.LayoutParams(dp(48), dp(48)))
             if (episodes.isEmpty()) content.addView(label(if (profiles.current.kids) "No episodes for kids profiles." else "No episodes available.", 20f))
             val episodeHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            val groups = episodes.groupBy { it.series }
+            // Newest series and newest episodes first (Beeb-public 0.11.0); `episodes` stays oldest-first for Up next.
+            val groups = SeriesOrder.groups(episodes).toMap(LinkedHashMap())
+            var tabUpId = View.NO_ID
+            StartWatching.resolve(episodes, store.history())?.let { action ->
+                fun nextOf(p: Programme) = episodes.getOrNull(episodes.indexOfFirst { it.id == p.id } + 1)
+                val (text, target) = when (action) {
+                    is StartAction.Resume -> "▶  Resume  ·  ${action.episode.subtitle.ifEmpty { action.episode.title }}" to action.episode
+                    is StartAction.Next -> "▶  Up next  ·  ${action.episode.subtitle.ifEmpty { action.episode.title }}" to action.episode
+                    is StartAction.Start -> "▶  Start watching" to action.episode
+                }
+                content.addView(button(text) { play(target, nextOf(target), false) }.apply { id = View.generateViewId() }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(8) })
+            }
             fun showSeries(items: List<Programme>, page: Int = 1) {
                 episodeHost.removeAllViews()
                 val previous = content; content = episodeHost
+                val firstRow = episodeHost.childCount + if (items.size > 30) 1 else 0
                 if (items.size > 30) { val bar = LinearLayout(this); if (page > 1) bar.addView(button("‹ Previous episodes") { showSeries(items, page - 1) }); if (page * 30 < items.size) bar.addView(button("More episodes ›") { showSeries(items, page + 1) }); content.addView(bar) }
                 grid(items.drop((page - 1) * 30).take(30)) { p ->
                     val index = episodes.indexOfFirst { it.id == p.id }; val candidate = episodes.getOrNull(index + 1)
                     val next = candidate?.takeIf { p.position > 0 && it.position > 0 || p.date.isNotEmpty() && it.date.isNotEmpty() }
                     episode(p, next)
                 }; content = previous
+                // Up from the first episode row reaches the series tabs.
+                (episodeHost.getChildAt(firstRow) as? LinearLayout)?.let { row -> if (tabUpId != View.NO_ID) for (i in 0 until row.childCount) row.getChildAt(i).nextFocusUpId = tabUpId }
             }
             if (groups.size > 1) {
                 val line = LinearLayout(this).apply { setPadding(0, dp(8), 0, dp(12)) }
@@ -444,8 +458,10 @@ class MainActivity : ComponentActivity() {
                         tag = title; text = if (title == "Episodes") "Specials" else title; textSize = 17f; gravity = Gravity.CENTER; isFocusable = true
                         setPadding(dp(22), dp(10), dp(22), dp(10))
                         setOnFocusChangeListener { _, _ -> updateSeries() }
-                        setOnClickListener { selected = title; updateSeries(); showSeries(items) }
+                        id = View.generateViewId()
+                        setOnClickListener { selected = title; tabUpId = id; updateSeries(); showSeries(items) }
                     }
+                    if (title == selected) tabUpId = tab.id
                     line.addView(tab, LinearLayout.LayoutParams(-2, dp(44)).apply { marginEnd = dp(10) })
                 }
                 updateSeries()
