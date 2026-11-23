@@ -1,3 +1,90 @@
+# Beeb (Jon): a fork of Beeb for Android TV
+
+This fork brings the Android TV app up to the features of the Apple TV version, [Beeb-public 0.11.0](https://github.com/usefulappmaker/Beeb-public/releases/tag/v0.11.0). It's for one household's living-room TV. Upstream's own README follows [below](#beeb-for-android-tv--016).
+
+**Milestone 1:** profiles, kids mode with a PIN, and Apple TV-style programme pages (newest series first, series tabs, Start watching/Resume).
+
+| | Upstream | This fork |
+| --- | --- | --- |
+| App ID | `org.beebplayer.android` | `org.beebplayer.android.jon` ("Beeb (Jon)") |
+| Debug app ID | `org.beebplayer.android.debug` | `org.beebplayer.android.jon.debug` ("Beeb (Jon) Preview") |
+| Kotlin package | `org.beebplayer.android` | unchanged, so upstream merges stay clean |
+
+The two apps install side by side.
+
+## Prerequisites and setup
+
+- JDK 17 or later
+- The Android SDK at `~/Android/Sdk` with **platform `android-37.0`**:
+  `~/Android/Sdk/cmdline-tools/latest/bin/android sdk install platforms/android-37.0`
+- `adb` access to the TV, either classic network adb on port 5555 or a paired wireless-debugging device
+
+```sh
+make local-properties           # sdk.dir for Gradle
+make keystore                   # once: ~/.android/beeb-jon.jks + .env (gitignored; back both up)
+cp local.mk.example local.mk    # set TV=<ip:port or mDNS name>
+make doctor                     # everything should say ok
+```
+
+If you build on a new machine with a different key, the installed fork must be uninstalled first, and that loses profiles and history. Copy the keystore and `.env` across instead.
+
+## Usage
+
+```sh
+make run-tv        # build the signed release, install it on the TV and launch it
+make install-tv    # install without launching, so you don't interrupt someone watching
+make version-tv    # which Beeb builds are on the TV
+```
+
+## Testing
+
+```sh
+make test          # JVM unit tests (no device needed). TDD runs on these
+make lint          # Android lint
+make test-device   # instrumented tests on DEVICE= (several hit live BBC services)
+```
+
+CI (`.github/workflows/ci.yml`) runs the unit tests and lint, and builds a release APK on every push and PR. It signs with the keystore from repository secrets (`BEEB_KEYSTORE_B64`, `BEEB_KEYSTORE_PASSWORD`). Merge only when CI is green.
+
+## Makefile targets
+
+| Target | What it does |
+| --- | --- |
+| `help` | List the targets |
+| `doctor` | Check the JDK, SDK 37, local.properties, keystore, TV setting and upstream remote |
+| `local-properties`, `keystore` | One-off setup |
+| `build`, `release`, `clean` | Debug APK, signed release APK, clean |
+| `test`, `lint`, `test-device` | Unit tests, lint, instrumented tests |
+| `tv-connect`, `install-tv`, `run-tv`, `run-tv-debug` | Living-room TV loops |
+| `logs`, `screenshot`, `version-tv` | Look at the TV |
+| `prefs` | Print the debug build's stored profiles, Saved and history |
+| `upstream` | Fetch upstream and list commits this branch doesn't have |
+
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph UI[MainActivity + Ui.kt]
+    Top[Top bar: profile button] --> Picker[Profile picker / PIN pad]
+    Home --> Show[Programme page: series tabs, Start/Resume]
+  end
+  Picker --> PS[ProfileStore]
+  PS --> KV[(KeyValue: SharedPreferences)]
+  LS[LocalStore: saved + history per profile] --> KV
+  PS -- current id --> LS
+  KP[KidsPolicy] -- filters --> Home
+  KP -- filters --> Show
+  PS -- kids mode --> KP
+  Api[BbcApi + Models] --> Home
+  Api --> Show
+  Order[SeriesOrder + StartWatching] --> Show
+  LS --> Order
+```
+
+Profile data copies the Apple TV app's shapes and key names exactly (`BeebProfile {id, name, kids, updatedAt}`, with dates in seconds since 2001), so a later household-sync client can use Beeb-public's `sync-server` unchanged.
+
+---
+
 # Beeb for Android TV — 0.1.6
 
 An independent native BBC player for Android TV and Google TV. Android 8.0 (API 26) or later. Beeb is not affiliated with or endorsed by the BBC.

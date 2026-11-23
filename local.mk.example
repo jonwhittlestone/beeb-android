@@ -1,0 +1,3 @@
+# Copy to local.mk (gitignored). Settings for this machine and home network.
+# Living-room TV, classic network adb on port 5555 (or an mDNS name from `adb mdns services`).
+TV = 192.168.0.73:5555
