@@ -62,8 +62,8 @@ class MainActivity : ComponentActivity() {
     private var generation = 0
     private var currentTab = "Home"
     private val backStack = mutableListOf<() -> Unit>()
-    private val pink = Color.rgb(250, 35, 137)
-    private val ink = Color.rgb(16, 16, 22)
+    private val pink = Palette.pink
+    private val ink = Palette.ink
     private var homeFeed: Home? = null
     private var featureIndex = 0
     private var banner: View? = null
@@ -123,11 +123,6 @@ class MainActivity : ComponentActivity() {
         main.removeCallbacks(rotate); main.removeCallbacks(liveRefresh); super.onPause() }
     override fun onDestroy() { directSetup?.cancel(); setupProgress?.dismiss(); episodePanel?.dismiss(); backupProgress?.dismiss(); generation++; searchRevision++; searchTask?.cancel(true); searchWorker.shutdownNow(); main.removeCallbacksAndMessages(null); io.shutdownNow(); super.onDestroy() }
     private fun navigateBack() { if (episodePanel?.isShowing == true) episodePanel?.dismiss() else if (backStack.isNotEmpty()) backStack.removeAt(backStack.lastIndex).invoke() else if (currentTab != "Home") { currentTab = "Home"; home() } else finish() }
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
-    private fun label(text: String, size: Float = 22f, muted: Boolean = false) = TextView(this).apply { this.text = text; textSize = size; setTextColor(if (muted) 0xFFB6B2C0.toInt() else Color.WHITE); setPadding(0, dp(6), 0, dp(8)) }
-    private fun border(focused: Boolean) = GradientDrawable().apply { setColor(if (focused) 0xFF382039.toInt() else 0xFF1C1B24.toInt()); cornerRadius = dp(10).toFloat(); setStroke(dp(if (focused) 3 else 1), if (focused) pink else 0xFF47434E.toInt()) }
-    private fun focus(view: View) { view.isFocusable = true; view.isFocusableInTouchMode = true; view.background = border(false); view.setOnFocusChangeListener { v, on -> v.background = border(on) } }
-    private fun button(text: String, action: () -> Unit) = Button(this).apply { this.text = text; isAllCaps = false; textSize = 18f; setTextColor(Color.WHITE); setPadding(dp(20), dp(8), dp(20), dp(8)); focus(this); setOnClickListener { action() } }
     private fun updateTabs() {
         tabViews.forEach { (name, item) ->
             val selected = name == currentTab
