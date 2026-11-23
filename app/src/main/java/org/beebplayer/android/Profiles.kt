@@ -28,6 +28,10 @@ class ProfileStore(private val kv: KeyValue, private val clock: () -> Double = :
     var kidsPin: String
         get() = kv.getString(PIN_KEY) ?: ""
         set(value) = kv.putString(PIN_KEY, value)
+    /** "last", "ask" or a profile id ("Always <name>"). */
+    var startup: String = "last"
+    /** Applies the startup setting; true when the profile picker must be shown first. */
+    fun launch(): Boolean = false
     val current: BeebProfile get() = profile(currentId) ?: profiles.first()
 
     fun profile(id: String) = profiles.firstOrNull { it.id == id }
