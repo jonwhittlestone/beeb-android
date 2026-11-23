@@ -53,6 +53,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var store: LocalStore
     private lateinit var profiles: ProfileStore
     private var profileChip: TextView? = null
+    /** Set by the Ask launch setting until someone picks; picking an adult profile then needs the kids PIN. */
+    private var pickerRequired = false
+    private var kidsRows: List<Pair<String, List<Programme>>>? = null
     private lateinit var body: LinearLayout
     private lateinit var pageHeader: LinearLayout
     private val tabViews = mutableMapOf<String, LinearLayout>()
@@ -70,19 +73,19 @@ class MainActivity : ComponentActivity() {
     private var featureIndex = 0
     private var banner: View? = null
     private var returnScreen: () -> Unit = { home() }
-    private val rotate = object : Runnable { override fun run() { if (currentTab == "Home" && backStack.isEmpty() && !body.hasFocus()) { featureIndex++; renderHome() }; main.postDelayed(this, 8000) } }
+    private val rotate = object : Runnable { override fun run() { if (currentTab == "Home" && backStack.isEmpty() && !body.hasFocus() && !profiles.current.kids) { featureIndex++; renderHome() }; main.postDelayed(this, 8000) } }
     private val liveRefresh = object : Runnable { override fun run() { if (currentTab == "Live" && backStack.isEmpty()) live(); main.postDelayed(this, 60_000) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = BbcApi(this); store = LocalStore(this); profiles = ProfileStore(PrefsKeyValue(this))
-        val pickerFirst = profiles.launch()
+        val pickerFirst = profiles.launch(); pickerRequired = pickerFirst
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) { override fun handleOnBackPressed() { navigateBack() } })
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(ink); setPadding(dp(38), dp(18), dp(38), dp(12)) }
         val nav = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         nav.addView(ImageView(this).apply { setImageResource(R.drawable.beeb_mark) }, LinearLayout.LayoutParams(dp(48), dp(48)))
-        for (tab in listOf("Home", "Browse", "Search", "Live", "Saved", "Settings")) {
+        for (tab in KidsPolicy.allTabs) {
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
                 isFocusable = true; isFocusableInTouchMode = true; contentDescription = tab
@@ -101,6 +104,7 @@ class MainActivity : ComponentActivity() {
         nav.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         profileChip = discoveryText("") { backStack.clear(); profilePicker() }.also { nav.addView(it, LinearLayout.LayoutParams(-2, dp(50))) }
         updateProfileChip()
+        applyKidsTabs()
         updateTabs()
         root.addView(nav)
         val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
@@ -114,7 +118,7 @@ class MainActivity : ComponentActivity() {
         if (incoming.action == Intent.ACTION_APPLICATION_PREFERENCES) { currentTab = "Settings"; settings(); return true }
         val channel = LiveHomeChannels.channelId(incoming) ?: return false
         backStack.clear(); currentTab = "Live"; live()
-        if (channel != "all") startActivity(Intent(this, PlaybackActivity::class.java).putExtra("channel", channel).putExtra("title", "BBC Live"))
+        if (channel != "all" && KidsPolicy.channels(listOf(Channel(channel, channel)), profiles.current.kids).isNotEmpty()) startActivity(Intent(this, PlaybackActivity::class.java).putExtra("channel", channel).putExtra("title", "BBC Live"))
         return true
     }
     override fun onResume() { super.onResume();
@@ -194,8 +198,32 @@ class MainActivity : ComponentActivity() {
             repeat(columns - group.size) { line.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f)) }; content.addView(line)
         }
     }
-    private fun home() { returnScreen = { home() }; if (homeFeed != null) renderHome() else load("Home", { api.home() }) { homeFeed = it; renderHome() } }
+    private fun home() { returnScreen = { home() }; if (profiles.current.kids) kidsHome() else if (homeFeed != null) renderHome() else load("Home", { api.home() }) { homeFeed = it; renderHome() } }
+    private fun continueWatching() {
+        val history = store.history()
+        if (history.isNotEmpty()) {
+            content.addView(label("Continue Watching", 24f))
+            val line = LinearLayout(this)
+            history.forEach { record ->
+                val target = record.target ?: record.episode
+                val view = card(target.copy(subtitle = (if (record.completed) "Up next · " else "Resume · ") + target.subtitle)) {
+                    if (record.completed && record.next == null) openShow(Programme(record.episode.showId, record.episode.title)) else episode(target, record.next)
+                }
+                view.setOnLongClickListener { AlertDialog.Builder(this).setMessage("Remove ${record.episode.title} from Continue Watching?").setPositiveButton("Remove") { _, _ -> store.remove(record.episode.showId); home() }.setNegativeButton("Cancel", null).show(); true }
+                line.addView(view, LinearLayout.LayoutParams(dp(250), -2).apply { marginEnd = dp(16) })
+            }
+            content.addView(HorizontalScrollView(this).apply { addView(line) })
+        }
+    }
+    /** Home for a kids profile, as Beeb-public's KidsHomeView: their Continue Watching plus CBeebies and CBBC. */
+    private fun kidsHome() {
+        val rows = kidsRows
+        if (rows == null) { load("Home", { KidsPolicy.homeCategories.mapNotNull { (id, title) -> runCatching { title to api.page(id, true, 1).shows }.getOrNull()?.takeIf { it.second.isNotEmpty() } } }) { kidsRows = it.ifEmpty { null }; if (it.isEmpty()) content.addView(label("CBeebies and CBBC programmes couldn't be loaded. Try again later.", 19f, true)) else kidsHome() }; return }
+        reset("Home"); continueWatching()
+        rows.forEach { (title, shows) -> row(title, shows, ::openShow) }
+    }
     private fun renderHome() {
+        if (profiles.current.kids) { kidsHome(); return }
         val feed = homeFeed ?: return; reset("Home")
         if (feed.features.isNotEmpty()) {
             val panel = FrameLayout(this).apply { isFocusable = true; isFocusableInTouchMode = true }
@@ -232,20 +260,7 @@ class MainActivity : ComponentActivity() {
             panel.setOnClickListener { openShow(feed.features[Math.floorMod(featureIndex, feed.features.size)].show) }
             updateFeature(); content.addView(panel); banner = panel
         }
-        val history = store.history()
-        if (history.isNotEmpty()) {
-            content.addView(label("Continue Watching", 24f))
-            val line = LinearLayout(this)
-            history.forEach { record ->
-                val target = record.target ?: record.episode
-                val view = card(target.copy(subtitle = (if (record.completed) "Up next · " else "Resume · ") + target.subtitle)) {
-                    if (record.completed && record.next == null) openShow(Programme(record.episode.showId, record.episode.title)) else episode(target, record.next)
-                }
-                view.setOnLongClickListener { AlertDialog.Builder(this).setMessage("Remove ${record.episode.title} from Continue Watching?").setPositiveButton("Remove") { _, _ -> store.remove(record.episode.showId); renderHome() }.setNegativeButton("Cancel", null).show(); true }
-                line.addView(view, LinearLayout.LayoutParams(dp(250), -2).apply { marginEnd = dp(16) })
-            }
-            content.addView(HorizontalScrollView(this).apply { addView(line) })
-        }
+        continueWatching()
         feed.rows.take(8).forEach { (title, shows) -> row(title, shows, ::openShow) }
         content.addView(button("Refresh Home") { homeFeed = null; home() })
     }
@@ -381,7 +396,7 @@ class MainActivity : ComponentActivity() {
     private fun openShow(show: Programme) {
         val previousScreen = returnScreen
         backStack.add(previousScreen)
-        load(show.title, { api.episodes(show) }) { episodes ->
+        load(show.title, { KidsPolicy.episodes(api.episodes(show), profiles.current.kids) }) { episodes ->
             io.execute { runCatching { catalogue.discover(show,episodes) } }
             content.addView(label(show.summary, 19f, true))
             val bookmark = ImageButton(this).apply {
@@ -401,7 +416,7 @@ class MainActivity : ComponentActivity() {
                 setOnClickListener { store.toggle(show); update(); announceForAccessibility(if (store.isSaved(show)) "Programme saved" else "Programme removed from Saved") }
             }
             pageHeader.addView(bookmark, LinearLayout.LayoutParams(dp(48), dp(48)))
-            if (episodes.isEmpty()) content.addView(label("No episodes available.", 20f))
+            if (episodes.isEmpty()) content.addView(label(if (profiles.current.kids) "No episodes for kids profiles." else "No episodes available.", 20f))
             val episodeHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             val groups = episodes.groupBy { it.series }
             fun showSeries(items: List<Programme>, page: Int = 1) {
@@ -489,7 +504,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun play(p: Programme, next: Programme?, restart: Boolean) { startActivity(Intent(this, PlaybackActivity::class.java).putExtra("episode", p.json().toString()).putExtra("next", next?.json()?.toString()).putExtra("restart", restart)) }
     private fun saved() { returnScreen = { saved() }; reset("Saved programmes"); val items = store.saved(); if (items.isEmpty()) content.addView(label("Save a programme from its episode page.", 20f, true)); grid(items, ::openShow) }
-    private fun live() { returnScreen = { live() }; load("Live", { api.channels() }) { channels -> grid(channels.map { Programme(it.id, it.title, it.name, image = it.image) }) { p -> startActivity(Intent(this, PlaybackActivity::class.java).putExtra("channel", p.id).putExtra("title", p.title + " · " + p.subtitle)) } } }
+    private fun live() { returnScreen = { live() }; load("Live", { KidsPolicy.channels(api.channels(), profiles.current.kids) }) { channels -> grid(channels.map { Programme(it.id, it.title, it.name, image = it.image) }) { p -> startActivity(Intent(this, PlaybackActivity::class.java).putExtra("channel", p.id).putExtra("title", p.title + " · " + p.subtitle)) } } }
     private fun saveBackupToDownloads(bytes: ByteArray) {
         if (android.os.Build.VERSION.SDK_INT < 29) {
             pendingBackup = bytes
@@ -565,11 +580,24 @@ class MainActivity : ComponentActivity() {
             if (p.id == profiles.currentId) chip.post { chip.requestFocus() }
         }
         content.addView(line)
-        content.addView(discoveryText("Manage profiles") { currentTab = "Settings"; settings() })
+        if (!profiles.current.kids) content.addView(discoveryText("Manage profiles") { currentTab = "Settings"; settings() })
     }
     private fun switchProfile(id: String) {
-        profiles.select(id); updateProfileChip()
+        if (profiles.needsPin(id, pickerRequired)) { pinPrompt("Enter the kids PIN") { pin -> if (pin == profiles.kidsPin) selectProfile(id) else Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show() }; return }
+        selectProfile(id)
+    }
+    private fun selectProfile(id: String) {
+        profiles.select(id); pickerRequired = false; updateProfileChip(); applyKidsTabs()
         backStack.clear(); currentTab = "Home"; home()
+    }
+    /** Shows only the tabs the current profile may use. */
+    private fun applyKidsTabs() { val visible = KidsPolicy.tabs(profiles.current.kids); tabViews.forEach { (tab, view) -> view.visibility = if (tab in visible) View.VISIBLE else View.GONE } }
+    private fun pinPrompt(title: String, action: (String) -> Unit) {
+        val field = EditText(this).apply { isSingleLine = true; inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD; filters = arrayOf(android.text.InputFilter.LengthFilter(4)); imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE; hint = "4 digits" }
+        val frame = FrameLayout(this).apply { setPadding(dp(24), dp(8), dp(24), 0); addView(field) }
+        val dialog = AlertDialog.Builder(this).setTitle(title).setView(frame).setPositiveButton("OK") { _, _ -> action(field.text.toString()) }.setNegativeButton("Cancel", null).create()
+        field.setOnEditorActionListener { _, a, _ -> (a == android.view.inputmethod.EditorInfo.IME_ACTION_DONE).also { if (it) dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick() } }
+        dialog.show()
     }
     private fun textPrompt(title: String, initial: String, action: (String) -> Unit) {
         val field = EditText(this).apply { setText(initial); isSingleLine = true; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS; imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE; setSelection(initial.length) }
@@ -587,6 +615,7 @@ class MainActivity : ComponentActivity() {
             val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
             line.addView(label(p.name + (if (p.id == profiles.currentId) "  (current)" else ""), 19f), LinearLayout.LayoutParams(dp(260), -2))
             line.addView(discoveryText("Rename") { textPrompt("Rename profile", p.name) { profiles.rename(p.id, it); updateProfileChip(); settings() } })
+            line.addView(discoveryText("Kids: ${if (p.kids) "On" else "Off"}") { profiles.setKids(p.id, !p.kids); kidsRows = null; applyKidsTabs(); if (profiles.current.kids) selectProfile(profiles.currentId) else settings() })
             if (profiles.profiles.size > 1) line.addView(discoveryText("Remove") {
                 AlertDialog.Builder(this).setMessage("Remove ${p.name}? Their Saved list and Continue Watching are deleted from this TV.")
                     .setPositiveButton("Remove") { _, _ -> profiles.remove(p.id); updateProfileChip(); settings() }.setNegativeButton("Cancel", null).show()
@@ -594,6 +623,11 @@ class MainActivity : ComponentActivity() {
             content.addView(line)
         }
         content.addView(discoveryText("Add profile") { textPrompt("New profile", "") { profiles.add(it); settings() } })
+        content.addView(label("Kids profiles: CBeebies and CBBC only, no programmes with BBC guidance warnings, no Search, Browse or Settings.", 17f, true))
+        content.addView(discoveryText(if (profiles.kidsPin.isEmpty()) "Kids PIN: Off (set one)" else "Kids PIN: On (change)") {
+            pinPrompt("New 4-digit kids PIN") { pin -> if (ProfileStore.validPin(pin)) { profiles.kidsPin = pin; settings() } else Toast.makeText(this, "Use exactly 4 digits", Toast.LENGTH_SHORT).show() }
+        })
+        if (profiles.kidsPin.isNotEmpty()) content.addView(discoveryText("Remove kids PIN") { profiles.kidsPin = ""; settings() })
         content.addView(discoveryText("On launch: ${startupLabel()}") {
             val choices = listOf("last", "ask") + profiles.profiles.map { it.id }
             profiles.startup = choices[(choices.indexOf(profiles.startup) + 1) % choices.size]
