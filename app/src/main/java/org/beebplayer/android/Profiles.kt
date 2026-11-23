@@ -19,6 +19,7 @@ class ProfileStore(private val kv: KeyValue, private val clock: () -> Double = :
         const val CURRENT_KEY = "beebProfile"
         const val PIN_KEY = "beebKidsPIN"
         const val MAX_NAME = 30
+        fun currentId(kv: KeyValue) = kv.getString(CURRENT_KEY) ?: DEFAULT_ID
     }
     var profiles: List<BeebProfile> = load(); private set
     var removed: Map<String, Double> = loadRemoved(); private set
@@ -46,6 +47,7 @@ class ProfileStore(private val kv: KeyValue, private val clock: () -> Double = :
         if (profiles.size <= 1 || profile(id) == null) return false
         profiles = profiles.filterNot { it.id == id }
         removed = removed + (id to clock())
+        LocalStore.PROFILE_KEYS.forEach { kv.putString("$it-$id", null) }
         if (currentId == id) select(profiles.first().id)
         save(); return true
     }
