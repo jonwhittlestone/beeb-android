@@ -128,13 +128,45 @@ version-tv: ## Show which Beeb builds are installed on the TV, and their version
 		v=$$($(ADB) -s $$serial shell dumpsys package $$p | grep -m1 versionName | tr -d ' '); \
 		echo "$$p $${v:-(not installed)}"; done
 
-##@ 5. Inspect data
+##@ 5. Local Android TV emulator (doylestone02)
+
+TV_AVD       ?= Television_1080p
+TV_EMU_PORT  ?= 5556
+TV_EMU       := emulator-$(TV_EMU_PORT)
+EMULATOR     := $(ANDROID_HOME)/emulator/emulator
+# The emulator can't decode real BBC video; that check needs real TV hardware (make test-device DEVICE=<tv>).
+EMU_SKIP     ?= org.beebplayer.android.DeviceTest\#liveBbcDiscoveryAndNativePlayback
+
+.PHONY: tv-emulator
+# Cold boot (-no-snapshot-load): a restored quick-boot snapshot keeps its old clock, and BBC TLS then fails.
+tv-emulator: ## Cold-boot the Android TV emulator (TV_AVD) on this machine and wait until it's ready
+	@if $(ADB) -s $(TV_EMU) get-state >/dev/null 2>&1; then echo "$(TV_EMU) already running"; else \
+		echo "Booting $(TV_AVD) as $(TV_EMU)..."; \
+		nohup $(EMULATOR) -avd $(TV_AVD) -port $(TV_EMU_PORT) -no-snapshot-load $(EMU_FLAGS) > emulator.log 2>&1 & fi
+	@$(ADB) -s $(TV_EMU) wait-for-device
+	@until [ "$$($(ADB) -s $(TV_EMU) shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 3; done
+	@host=$$(date +%s); emu=$$($(ADB) -s $(TV_EMU) shell date +%s | tr -d '\r'); \
+		if [ $$((host - emu)) -gt 300 ] || [ $$((emu - host)) -gt 300 ]; then \
+		echo "!! emulator clock is off by more than 5 minutes: make tv-emulator-stop, then run this again"; exit 1; fi
+	@echo "$(TV_AVD) ready as $(TV_EMU)"
+
+.PHONY: run-tv-local-emulator
+run-tv-local-emulator: release tv-emulator ## Boot the TV emulator, run the device tests on it, then install and launch the release
+	ANDROID_SERIAL=$(TV_EMU) $(GRADLE) connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=$(EMU_SKIP)
+	$(ADB) -s $(TV_EMU) install -r $(RELEASE_APK)
+	$(ADB) -s $(TV_EMU) shell am start -n $(call ACTIVITY,$(APP_ID))
+
+.PHONY: tv-emulator-stop
+tv-emulator-stop: ## Shut down the TV emulator
+	$(ADB) -s $(TV_EMU) emu kill
+
+##@ 6. Inspect data
 
 .PHONY: prefs
 prefs: ## Print the debug build's stored profiles, saved and history (SharedPreferences XML)
 	@serial=$$($(WIFI_DEVICE) "$(TV)") && $(ADB) -s $$serial shell run-as $(DEBUG_ID) cat shared_prefs/BeebLocal.xml
 
-##@ 6. Upstream
+##@ 7. Upstream
 
 .PHONY: upstream
 upstream: ## Fetch upstream and show commits not yet in this branch
