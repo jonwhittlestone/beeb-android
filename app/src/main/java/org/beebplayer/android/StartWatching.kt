@@ -9,5 +9,13 @@ sealed interface StartAction {
 }
 
 object StartWatching {
-    fun resolve(episodes: List<Programme>, history: List<Progress>): StartAction? = null
+    /** [episodes] oldest first (as BbcApi returns them); [history] is the current profile's Continue Watching. */
+    fun resolve(episodes: List<Programme>, history: List<Progress>): StartAction? {
+        val first = episodes.firstOrNull() ?: return null
+        val showId = first.showId
+        val record = history.firstOrNull { it.episode.showId == showId } ?: return StartAction.Start(first)
+        if (!record.completed) return StartAction.Resume(record.episode, record.position)
+        val following = record.next ?: episodes.getOrNull(episodes.indexOfFirst { it.id == record.episode.id } + 1)?.takeIf { episodes.any { e -> e.id == record.episode.id } }
+        return following?.let { StartAction.Next(it) } ?: StartAction.Start(first)
+    }
 }
