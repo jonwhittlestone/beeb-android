@@ -14,7 +14,7 @@ fun artwork(images: JSONObject?, episode: Boolean = false, large: Boolean = fals
     return keys.map { images?.text(it).orEmpty() }.firstOrNull { it.isNotBlank() }?.replace("{recipe}", if (large) "1920x1080" else "640x360").orEmpty()
 }
 
-data class Programme(val id: String, val title: String, val subtitle: String = "", val summary: String = "", val image: String = "", val version: String = "", val showId: String = id, val uhd: Boolean = false, val hdr: Boolean = false, val duration: String = "", val series: String = "Episodes", val position: Int = 0, val date: String = "") {
+data class Programme(val id: String, val title: String, val subtitle: String = "", val summary: String = "", val image: String = "", val version: String = "", val showId: String = id, val uhd: Boolean = false, val hdr: Boolean = false, val duration: String = "", val series: String = "Episodes", val position: Int = 0, val date: String = "", val guidance: String = "") {
     fun json() = JSONObject().put("id", id).put("title", title).put("subtitle", subtitle).put("summary", summary).put("image", image).put("version", version).put("showId", showId).put("uhd", uhd).put("hdr", hdr).put("duration", duration).put("series", series).put("position", position).put("date", date)
     companion object {
         fun restore(j: JSONObject) = Programme(j.text("id"), j.text("title"), j.text("subtitle"), j.text("summary"), j.text("image"), j.text("version"), j.text("showId", j.text("id")), j.optBoolean("uhd"), j.optBoolean("hdr"), j.text("duration"), j.text("series", "Episodes"), j.optInt("position"), j.text("date"))
