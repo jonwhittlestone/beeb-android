@@ -51,6 +51,8 @@ class MainActivity : ComponentActivity() {
     }
     private lateinit var api: BbcApi
     private lateinit var store: LocalStore
+    private lateinit var profiles: ProfileStore
+    private var profileChip: TextView? = null
     private lateinit var body: LinearLayout
     private lateinit var pageHeader: LinearLayout
     private val tabViews = mutableMapOf<String, LinearLayout>()
@@ -73,7 +75,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        api = BbcApi(this); store = LocalStore(this)
+        api = BbcApi(this); store = LocalStore(this); profiles = ProfileStore(PrefsKeyValue(this))
+        val pickerFirst = profiles.launch()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) { override fun handleOnBackPressed() { navigateBack() } })
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(ink); setPadding(dp(38), dp(18), dp(38), dp(12)) }
@@ -95,12 +98,15 @@ class MainActivity : ComponentActivity() {
             tabViews[tab] = item
             nav.addView(item, LinearLayout.LayoutParams(-2, dp(50)).apply { marginStart = dp(6) })
         }
+        nav.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        profileChip = discoveryText("") { backStack.clear(); profilePicker() }.also { nav.addView(it, LinearLayout.LayoutParams(-2, dp(50))) }
+        updateProfileChip()
         updateTabs()
         root.addView(nav)
         val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(8), dp(10), dp(30)); clipChildren = false }
         scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(24) }); setContentView(root)
-        if (!handleLaunch(intent)) home()
+        if (!handleLaunch(intent)) { if (pickerFirst) profilePicker() else home() }
         io.execute { LiveHomeChannels.refreshIfNeeded(this) }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleLaunch(intent) }
@@ -547,10 +553,58 @@ class MainActivity : ComponentActivity() {
             } }
         }
     }
+    private fun updateProfileChip() { profileChip?.apply { text = "●  " + profiles.current.name; contentDescription = "Profile: ${profiles.current.name}. Switch profile" } }
+    /** Who's watching? Picking a profile switches Saved and Continue Watching. */
+    private fun profilePicker() {
+        returnScreen = { profilePicker() }
+        reset("Who's watching?")
+        val line = LinearLayout(this).apply { setPadding(0, dp(8), 0, dp(16)) }
+        profiles.profiles.forEach { p ->
+            val chip = discoveryText(p.name + if (p.kids) "  ·  Kids" else "") { switchProfile(p.id) }
+            line.addView(chip, LinearLayout.LayoutParams(-2, dp(56)).apply { marginEnd = dp(12) })
+            if (p.id == profiles.currentId) chip.post { chip.requestFocus() }
+        }
+        content.addView(line)
+        content.addView(discoveryText("Manage profiles") { currentTab = "Settings"; settings() })
+    }
+    private fun switchProfile(id: String) {
+        profiles.select(id); updateProfileChip()
+        backStack.clear(); currentTab = "Home"; home()
+    }
+    private fun textPrompt(title: String, initial: String, action: (String) -> Unit) {
+        val field = EditText(this).apply { setText(initial); isSingleLine = true; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS; imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE; setSelection(initial.length) }
+        val frame = FrameLayout(this).apply { setPadding(dp(24), dp(8), dp(24), 0); addView(field) }
+        val dialog = AlertDialog.Builder(this).setTitle(title).setView(frame).setPositiveButton("Save") { _, _ -> action(field.text.toString()) }.setNegativeButton("Cancel", null).create()
+        // The TV keyboard's ✓ saves, so nobody has to D-pad across to the Save button.
+        field.setOnEditorActionListener { _, id, _ -> (id == android.view.inputmethod.EditorInfo.IME_ACTION_DONE).also { if (it) dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick() } }
+        dialog.show()
+    }
+    private fun startupLabel() = when (val s = profiles.startup) { "last" -> "Last used"; "ask" -> "Ask who's watching"; else -> "Always " + (profiles.profile(s)?.name ?: "last used") }
+    private fun profileSettings() {
+        content.addView(label("Profiles", 22f))
+        content.addView(label("Each profile has its own Saved list and Continue Watching.", 17f, true))
+        profiles.profiles.forEach { p ->
+            val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            line.addView(label(p.name + (if (p.id == profiles.currentId) "  (current)" else ""), 19f), LinearLayout.LayoutParams(dp(260), -2))
+            line.addView(discoveryText("Rename") { textPrompt("Rename profile", p.name) { profiles.rename(p.id, it); updateProfileChip(); settings() } })
+            if (profiles.profiles.size > 1) line.addView(discoveryText("Remove") {
+                AlertDialog.Builder(this).setMessage("Remove ${p.name}? Their Saved list and Continue Watching are deleted from this TV.")
+                    .setPositiveButton("Remove") { _, _ -> profiles.remove(p.id); updateProfileChip(); settings() }.setNegativeButton("Cancel", null).show()
+            })
+            content.addView(line)
+        }
+        content.addView(discoveryText("Add profile") { textPrompt("New profile", "") { profiles.add(it); settings() } })
+        content.addView(discoveryText("On launch: ${startupLabel()}") {
+            val choices = listOf("last", "ask") + profiles.profiles.map { it.id }
+            profiles.startup = choices[(choices.indexOf(profiles.startup) + 1) % choices.size]
+            (content.findFocus() as? TextView)?.text = "On launch: ${startupLabel()}"
+        })
+    }
     private fun settings() {
         returnScreen = { settings() }
         reset("Settings")
         content.addView(label("Beeb for Android TV · ${BuildConfig.VERSION_NAME}", 22f))
+        profileSettings()
         content.addView(label("4K UHD playback", 24f)); content.addView(label(api.vault.status(), 19f, true))
         content.addView(label("Automatically configure UHD playback on this TV. No computer required.",18f,true))
         content.addView(discoveryText("Enable BBC UHD") { enableDirectUhd() })
