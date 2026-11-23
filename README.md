@@ -42,7 +42,10 @@ make version-tv    # which Beeb builds are on the TV
 make test          # JVM unit tests (no device needed). TDD runs on these
 make lint          # Android lint
 make test-device   # instrumented tests on DEVICE= (several hit live BBC services)
+make run-tv-local-emulator   # the same device tests on a local Android TV emulator, then launch the app there
 ```
+
+The emulator is cold-booted (`-no-snapshot-load`). A quick-boot snapshot keeps the clock from when it was saved, and BBC's TLS checks then fail with "Chain validation failed".
 
 CI (`.github/workflows/ci.yml`) runs the unit tests and lint, and builds a release APK on every push and PR. It signs with the keystore from repository secrets (`BEEB_KEYSTORE_B64`, `BEEB_KEYSTORE_PASSWORD`). Merge only when CI is green.
 
@@ -57,6 +60,8 @@ CI (`.github/workflows/ci.yml`) runs the unit tests and lint, and builds a relea
 | `test`, `lint`, `test-device` | Unit tests, lint, instrumented tests |
 | `tv-connect`, `install-tv`, `run-tv`, `run-tv-debug` | Living-room TV loops |
 | `logs`, `screenshot`, `version-tv` | Look at the TV |
+| `run-tv-local-emulator` | Cold-boot the `Television_1080p` Android TV emulator on this machine, run the device tests on it (except real-video decoding, which needs TV hardware), then install and launch the release |
+| `tv-emulator`, `tv-emulator-stop` | Just boot (and check the clock of) or shut down that emulator |
 | `prefs` | Print the debug build's stored profiles, Saved and history |
 | `upstream` | Fetch upstream and list commits this branch doesn't have |
 
