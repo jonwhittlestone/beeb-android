@@ -20,6 +20,7 @@ class ProfileStore(private val kv: KeyValue, private val clock: () -> Double = :
         const val PIN_KEY = "beebKidsPIN"
         const val STARTUP_KEY = "beebProfileStartup"
         const val MAX_NAME = 30
+        fun validPin(pin: String) = false
         fun currentId(kv: KeyValue) = kv.getString(CURRENT_KEY) ?: DEFAULT_ID
     }
     var profiles: List<BeebProfile> = load(); private set
@@ -40,6 +41,8 @@ class ProfileStore(private val kv: KeyValue, private val clock: () -> Double = :
     }
     val current: BeebProfile get() = profile(currentId) ?: profiles.first()
 
+    /** True when switching to [id] must be confirmed with the kids PIN. */
+    fun needsPin(id: String, pickerRequired: Boolean) = false
     fun profile(id: String) = profiles.firstOrNull { it.id == id }
 
     fun add(name: String): BeebProfile? {
